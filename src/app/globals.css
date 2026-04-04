@@ -44,13 +44,15 @@
 }
 
 :root {
-  --background: oklch(0.99 0.01 90); /* Soft off-white/beige */
+  --background: oklch(0.99 0.01 90);
+  /* Soft off-white/beige */
   --foreground: oklch(0.141 0.005 285.823);
   --card: rgba(255, 255, 255, 0.7);
   --card-foreground: oklch(0.141 0.005 285.823);
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.141 0.005 285.823);
-  --primary: oklch(0.40 0.15 280); /* Deep Purple */
+  --primary: oklch(0.40 0.15 280);
+  /* Deep Purple */
   --primary-foreground: oklch(0.985 0 0);
   --secondary: oklch(0.967 0.001 286.375);
   --secondary-foreground: oklch(0.21 0.006 285.885);
@@ -83,6 +85,7 @@
   * {
     @apply border-border outline-ring/50;
   }
+
   body {
     @apply bg-background text-foreground;
   }
@@ -100,18 +103,21 @@
 
 /* Glassmorphism for main cards */
 .glass-panel {
-  background: rgba(255, 255, 255, 0.85); /* Slightly less translucent to pop over background */
-  backdrop-filter: blur(24px); /* Heavier blur */
+  background: rgba(255, 255, 255, 0.85);
+  /* Slightly less translucent to pop over background */
+  backdrop-filter: blur(24px);
+  /* Heavier blur */
   -webkit-backdrop-filter: blur(24px);
   border: 1px solid rgba(255, 255, 255, 1);
   box-shadow: 0 12px 40px 0 rgba(31, 38, 135, 0.08),
-              0 1px 3px 0 rgba(255, 255, 255, 0.8) inset;
+    0 1px 3px 0 rgba(255, 255, 255, 0.8) inset;
 }
 
 /* Smooth micro animations */
 .glow-on-hover {
   transition: all 0.3s ease;
 }
+
 .glow-on-hover:hover {
   box-shadow: 0 0 20px 0 rgba(94, 53, 177, 0.3);
   transform: translateY(-2px);

@@ -132,7 +132,7 @@ export default function ClipTuneApp() {
 
     audio.onloadedmetadata = () => {
       setDuration(audio.duration);
-      audio.play().then(() => setIsPlaying(true)).catch(() => {});
+      audio.play().then(() => setIsPlaying(true)).catch(() => { });
     };
   }, [activeAudioUrl]);
 
@@ -697,11 +697,10 @@ export default function ClipTuneApp() {
                               setActiveVersionIndex(idx);
                               setIsPlaying(false);
                             }}
-                            className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all duration-200 shrink-0 ${
-                              idx === activeVersionIndex
+                            className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all duration-200 shrink-0 ${idx === activeVersionIndex
                                 ? "bg-primary text-white shadow-md shadow-primary/20"
                                 : "bg-zinc-100 text-zinc-500 hover:bg-zinc-200 hover:text-zinc-700"
-                            }`}
+                              }`}
                           >
                             V{idx + 1}
                           </button>
@@ -710,7 +709,7 @@ export default function ClipTuneApp() {
                     )}
 
                     <div className="flex items-center gap-6">
-                      
+
                       <Button
                         onClick={handlePlayPause}
                         disabled={analysisState === "refining"}
@@ -725,30 +724,30 @@ export default function ClipTuneApp() {
                             <p className="text-xs font-bold text-primary tracking-wider uppercase mb-1 flex items-center gap-1.5"><Music className="w-3.5 h-3.5" /> Soundtrack</p>
                             <h3 className="text-xl font-bold text-zinc-900 truncate">{activeVersion.songTitle}</h3>
                           </div>
-                          
+
                           <div className="flex flex-col items-end gap-1 shrink-0 ml-3">
-                             <span className="text-xs font-mono text-zinc-400 bg-zinc-100 px-2 py-1 rounded-md">{activeVersion.label}</span>
-                             <span className="text-xs font-mono font-medium text-zinc-500">{formatTime(audioCurrentTime)} / {formatTime(duration)}</span>
+                            <span className="text-xs font-mono text-zinc-400 bg-zinc-100 px-2 py-1 rounded-md">{activeVersion.label}</span>
+                            <span className="text-xs font-mono font-medium text-zinc-500">{formatTime(audioCurrentTime)} / {formatTime(duration)}</span>
                           </div>
                         </div>
-                        
+
                         {/* Audio Progress Bar */}
                         <div className="w-full bg-zinc-100 h-2 rounded-full overflow-hidden mt-3 cursor-pointer relative group"
-                             onClick={(e) => {
-                               const rect = e.currentTarget.getBoundingClientRect();
-                               const percent = (e.clientX - rect.left) / rect.width;
-                               if (audioRef.current && audioRef.current.duration) {
-                                 audioRef.current.currentTime = percent * audioRef.current.duration;
-                               }
-                             }}>
-                           <div 
-                             className="h-full bg-primary relative rounded-full transition-all duration-100 ease-linear"
-                             style={{ width: `${duration ? (audioCurrentTime / duration) * 100 : 0}%` }}
-                           >
-                             <div className="absolute right-0 top-1/2 -translate-y-1/2 w-4 h-4 bg-white rounded-full shadow-md border-2 border-primary opacity-0 group-hover:opacity-100 transition-opacity" />
-                           </div>
+                          onClick={(e) => {
+                            const rect = e.currentTarget.getBoundingClientRect();
+                            const percent = (e.clientX - rect.left) / rect.width;
+                            if (audioRef.current && audioRef.current.duration) {
+                              audioRef.current.currentTime = percent * audioRef.current.duration;
+                            }
+                          }}>
+                          <div
+                            className="h-full bg-primary relative rounded-full transition-all duration-100 ease-linear"
+                            style={{ width: `${duration ? (audioCurrentTime / duration) * 100 : 0}%` }}
+                          >
+                            <div className="absolute right-0 top-1/2 -translate-y-1/2 w-4 h-4 bg-white rounded-full shadow-md border-2 border-primary opacity-0 group-hover:opacity-100 transition-opacity" />
+                          </div>
                         </div>
-                        
+
                         {/* Prompt used for this version */}
                         {activeVersion.promptUsed && activeVersionIndex > 0 && (
                           <p className="text-xs text-zinc-400 mt-3 italic truncate">Direction: &ldquo;{activeVersion.promptUsed}&rdquo;</p>
@@ -756,18 +755,18 @@ export default function ClipTuneApp() {
 
                         <div className="flex gap-2 mt-3 flex-wrap">
                           {activeVersion.outputTags.map((tag, i) => (
-                             <span key={i} className="text-xs bg-zinc-100 text-zinc-600 px-2.5 py-1 rounded-md capitalize">{tag}</span>
+                            <span key={i} className="text-xs bg-zinc-100 text-zinc-600 px-2.5 py-1 rounded-md capitalize">{tag}</span>
                           ))}
                         </div>
                       </div>
 
                       <div className="shrink-0 pl-4 border-l border-zinc-100">
-                        <a 
-                          href={activeVersion.audioUrl} 
+                        <a
+                          href={activeVersion.audioUrl}
                           download
                           className="flex items-center justify-center w-10 h-10 text-zinc-400 hover:text-primary hover:bg-primary/5 rounded-xl transition-colors"
                         >
-                           <Download className="w-5 h-5" />
+                          <Download className="w-5 h-5" />
                         </a>
                       </div>
 
@@ -775,7 +774,7 @@ export default function ClipTuneApp() {
                   </CardContent>
 
                   {/* Hidden Audio Element */}
-                  <audio 
+                  <audio
                     ref={audioRef}
                     onTimeUpdate={() => {
                       if (audioRef.current) setAudioCurrentTime(audioRef.current.currentTime);
