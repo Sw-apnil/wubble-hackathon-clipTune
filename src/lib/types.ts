@@ -15,6 +15,7 @@ export type Project = {
   createdAt: number;
   videoFileUrl: string | null;
   status: ProjectStatus;
+  wubbleProjectId: string | null; // Wubble API project_id for continuity across refinements
   analysisData: {
     reasoning: string;
     moodTags: string[];

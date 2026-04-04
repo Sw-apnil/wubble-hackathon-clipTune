@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "ClipTune",
-  description: "AI Music Generator",
+  description: "AI Music Director",
 };
 
 export default function RootLayout({

@@ -142,9 +142,9 @@ export async function analyzeVideo(videoUrl: string): Promise<{ text: string; pr
 
   // If invalid JSON, immediately infer analysis from the freeform text.
   // DO NOT retry by sending another /chat request to prevent Wubble API 409 conflicts.
-  return { 
-    text: inferAnalysisFromText(response.text), 
-    projectId: response.projectId 
+  return {
+    text: inferAnalysisFromText(response.text),
+    projectId: response.projectId
   };
 }
 
@@ -188,19 +188,21 @@ async function sendChatRequest(prompt: string, videos?: string[], projectId?: st
 
   if (json.request_id) {
     console.log("[Wubble] ⏳ Got request_id, polling:", json.request_id);
+    console.log("[Wubble] 📍 Captured project_id from chat response:", resProjectId);
     const pollRes = await pollForResult(json.request_id, responseType);
-    
+
     if (typeof pollRes === 'object' && pollRes !== null && 'text' in pollRes) {
-      return { text: pollRes.text, projectId: pollRes.projectId as any };
+      // IMPORTANT: Always prefer resProjectId — polling fallbacks return projectId: undefined
+      return { text: pollRes.text, projectId: pollRes.projectId || resProjectId };
     }
-    
+
     return { text: pollRes as string, projectId: resProjectId };
   }
 
   console.warn("[Wubble] ⚠️  Unexpected response shape:", json);
   return {
     text: inferAnalysisFromText("fallback"),
-    projectId: undefined as any
+    projectId: resProjectId
   };
 }
 
@@ -307,11 +309,16 @@ async function pollForResult(requestId: string, expectedType: "text" | "audio" =
         return response.streaming.final_audio_url;
       }
       if (expectedType === "text") {
-        console.warn("⚠️ Streaming detected — forcing fallback");
-        return {
-          text: inferAnalysisFromText(response.model_response || "fallback"),
-          projectId: undefined
-        };
+        if (attempt > 60) {
+          console.warn("⚠️ Streaming timed out — forcing fallback");
+          return {
+            text: inferAnalysisFromText(response.model_response || "fallback"),
+            projectId: undefined
+          };
+        }
+        // Wait until it officially hits "completed" so Wubble unlocks the project_id
+        console.log("[Wubble] ⏳ Waiting for Wubble to finalize analysis...");
+        continue;
       } else {
         if (attempt > 60) {
           console.warn("⚠️ Generation stuck in streaming — forcing retry");
@@ -323,7 +330,7 @@ async function pollForResult(requestId: string, expectedType: "text" | "audio" =
 
     if (response.status === "completed") {
       console.log("[Wubble] ✅ Polling complete");
-      
+
       if (expectedType === "text") {
         if (response.response_type === "generation" || response.generation_type) {
           console.warn("⚠️ Generation detected during analysis — fallback");
@@ -332,7 +339,7 @@ async function pollForResult(requestId: string, expectedType: "text" | "audio" =
             projectId: undefined
           };
         }
-        
+
         if (!response.model_response) {
           console.warn("⚠️ Missing model_response — fallback");
           return {
@@ -340,31 +347,31 @@ async function pollForResult(requestId: string, expectedType: "text" | "audio" =
             projectId: undefined
           };
         }
-        
+
         return typeof response.model_response === "string" ? response.model_response : JSON.stringify(response.model_response);
       }
-      
+
       if (expectedType === "audio") {
         console.log("[Wubble] 🔍 Extracting audio URL from completed response...");
-        
+
         // Try all known audio URL paths from the API response
-        const audioUrl = 
+        const audioUrl =
           // Direct streaming final URL (most reliable for gen5)
           response.streaming?.final_audio_url ||
           // From results.custom_data.audios array
           response.results?.custom_data?.audios?.[0]?.audio_url ||
           // Legacy paths
-          response.audio_url || 
-          response.data?.results?.audio_url || 
-          response.results?.audio_url || 
-          response.data?.results?.custom_data?.audio_url || 
+          response.audio_url ||
+          response.data?.results?.audio_url ||
+          response.results?.audio_url ||
+          response.data?.results?.custom_data?.audio_url ||
           response.results?.custom_data?.audio_url;
-                         
+
         if (audioUrl) {
           console.log("[Wubble] 🎵 Found audio URL:", audioUrl);
           return audioUrl;
         }
-        
+
         console.error("[Wubble] ❌ No audio URL found. Full response:\n", JSON.stringify(response, null, 2));
         throw new Error("Invalid music generation response — missing audio_url");
       }
@@ -374,12 +381,15 @@ async function pollForResult(requestId: string, expectedType: "text" | "audio" =
     }
 
     if (response.status === "failed" || response.status === "error") {
-      console.error("[Wubble] ❌ Request failed:", response);
+      const errMsg = typeof response.error === 'object'
+        ? (response.error?.message || JSON.stringify(response.error))
+        : (response.error || response.message || "unknown error");
+      console.error("[Wubble] ❌ Request failed:", errMsg);
       if (expectedType === "text") {
         console.warn("⚠️ Error state — fallback");
         return { text: inferAnalysisFromText("fallback"), projectId: undefined };
       }
-      throw new Error(`Request failed: ${response.error || response.message || "unknown error"}`);
+      throw new Error(`Request failed: ${errMsg}`);
     }
   }
 
@@ -387,7 +397,7 @@ async function pollForResult(requestId: string, expectedType: "text" | "audio" =
     console.warn("⚠️ Timeout — fallback");
     return { text: inferAnalysisFromText("fallback"), projectId: undefined };
   }
-  
+
   throw new Error(`Polling timed out after ${(MAX_POLLS * POLL_INTERVAL_MS) / 1000}s`);
 }
 
@@ -484,11 +494,13 @@ export async function generateMusic(projectId: string, prompt: string): Promise<
   let audioUrl: string | undefined;
 
   if (json.request_id) {
-    console.log("[Wubble] ⏳ Polling for music generation via /request/{id}/status:", json.request_id);
+    console.log("[Wubble] ⏳ Polling for music generation:", json.request_id);
     audioUrl = (await pollForResult(json.request_id, "audio")) as string;
   } else {
-    // If it completed instantly without pooling
-    audioUrl = json.results?.custom_data?.audio_url;
+    // If it completed instantly without polling
+    audioUrl = json.results?.custom_data?.audio_url ||
+      json.results?.custom_data?.audios?.[0]?.audio_url ||
+      json.streaming?.final_audio_url;
     if (!audioUrl) {
       console.error("[Wubble] ❌ No audio_url found in immediate result. Full response:\n", JSON.stringify(json, null, 2));
       throw new Error("Failed to extract audio_url from immediate generation response");
@@ -497,5 +509,73 @@ export async function generateMusic(projectId: string, prompt: string): Promise<
 
   console.log("[Wubble] ✅ Music generation complete! URL:", audioUrl);
   if (!audioUrl) throw new Error("Audio generation returned empty result");
+  return audioUrl;
+}
+
+// ─────────────────────────────────────────────────────────────
+// STEP 6 — Refine Music (Director Mode)
+// POST /api/v1/chat  with user direction + SAME project_id
+// This maintains continuity — Wubble uses project_id to
+// remember the previous generation and apply refinements.
+// ─────────────────────────────────────────────────────────────
+
+export async function refineMusic(projectId: string, userDirection: string): Promise<string> {
+  console.log("\n[Wubble] ═══════════════════════════════════════");
+  console.log("[Wubble] 🎬 Director Mode — Refining soundtrack");
+  console.log("[Wubble] 📝 Direction:", userDirection);
+  console.log("[Wubble] 📍 Project:", projectId);
+  console.log("[Wubble] ═══════════════════════════════════════\n");
+
+  if (!projectId) {
+    throw new Error("Cannot refine without a project_id — generate first");
+  }
+
+  const body: Record<string, unknown> = {
+    prompt: userDirection,
+    project_id: projectId,
+    vocals: true,
+    vo: true,
+  };
+
+  const res = await fetch(`${API_BASE}/chat`, {
+    method: "POST",
+    headers: {
+      ...getAuthHeaders(),
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "unknown");
+    console.error(`[Wubble] ❌ Refinement failed (${res.status}): ${errText}`);
+    try {
+      const errJson = JSON.parse(errText);
+      const msg = errJson?.error?.message || errJson?.message || errText;
+      throw new Error(msg);
+    } catch (parseErr) {
+      if (parseErr instanceof Error && parseErr.message !== errText) throw parseErr;
+      throw new Error(`Music refinement failed (${res.status})`);
+    }
+  }
+
+  const json = await res.json();
+  let audioUrl: string | undefined;
+
+  if (json.request_id) {
+    console.log("[Wubble] ⏳ Polling for refinement:", json.request_id);
+    audioUrl = (await pollForResult(json.request_id, "audio")) as string;
+  } else {
+    audioUrl = json.results?.custom_data?.audio_url ||
+      json.results?.custom_data?.audios?.[0]?.audio_url ||
+      json.streaming?.final_audio_url;
+    if (!audioUrl) {
+      console.error("[Wubble] ❌ No audio_url in refinement response:\n", JSON.stringify(json, null, 2));
+      throw new Error("Failed to extract audio_url from refinement response");
+    }
+  }
+
+  console.log("[Wubble] ✅ Refinement complete! URL:", audioUrl);
+  if (!audioUrl) throw new Error("Refinement returned empty result");
   return audioUrl;
 }

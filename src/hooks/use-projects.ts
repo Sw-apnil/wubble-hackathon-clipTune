@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback } from "react";
 import { Project, Version } from "@/lib/types";
 
-const STORAGE_KEY = "cliptune_projects_v1";
-const ACTIVE_PROJECT_KEY = "cliptune_current_project_id_v1";
+const STORAGE_KEY = "cliptune_projects_v2";
+const ACTIVE_PROJECT_KEY = "cliptune_current_project_id_v2";
 
 const generateId = () => Math.random().toString(36).substring(2, 9);
 
@@ -20,6 +20,13 @@ export function useProjects() {
       let parsedProjects: Project[] = [];
       if (storedProjects) {
         parsedProjects = JSON.parse(storedProjects);
+        
+        // Migration: ensure all projects have wubbleProjectId field
+        parsedProjects = parsedProjects.map(p => ({
+          ...p,
+          wubbleProjectId: p.wubbleProjectId ?? null,
+        }));
+        
         setProjects(parsedProjects);
       }
 
@@ -33,7 +40,7 @@ export function useProjects() {
       } else if (parsedProjects.length > 0) {
         setCurrentProjectId(parsedProjects[0].id);
       } else {
-        // Run Case A: No data, create a fresh idle project
+        // No data, create a fresh idle project
         createNewProject();
       }
     } catch(e) {
@@ -67,6 +74,7 @@ export function useProjects() {
       createdAt: Date.now(),
       videoFileUrl: null,
       status: "idle",
+      wubbleProjectId: null,
       analysisData: null,
       versions: []
     };
@@ -74,13 +82,18 @@ export function useProjects() {
     setCurrentProjectId(newProj.id);
   }, []);
 
+  // When a new video is uploaded, reset the project for a clean slate
   const attachVideoToProject = useCallback((url: string) => {
     updateCurrentProject(p => ({
       ...p,
       videoFileUrl: url,
-      status: "analyzing"
+      status: "analyzing",
+      wubbleProjectId: null,  // Will be set fresh from analysis response
+      versions: [],           // Reset versions for new video
+      analysisData: null,     // Reset analysis
     }));
   }, [updateCurrentProject]);
+
 
   const updateAnalysis = useCallback((reasoning: string, moodTags: string[]) => {
     updateCurrentProject(p => ({
@@ -112,11 +125,17 @@ export function useProjects() {
     });
   }, [updateCurrentProject]);
 
-  const refineProjectContext = useCallback((promptContent: string) => {
-    // Sets the status back to 'refining' immediately
+  const setWubbleProjectId = useCallback((wubbleId: string) => {
     updateCurrentProject(p => ({
       ...p,
-      status: "refining"
+      wubbleProjectId: wubbleId
+    }));
+  }, [updateCurrentProject]);
+
+  const setProjectStatus = useCallback((status: Project['status']) => {
+    updateCurrentProject(p => ({
+      ...p,
+      status
     }));
   }, [updateCurrentProject]);
 
@@ -132,6 +151,7 @@ export function useProjects() {
     attachVideoToProject,
     updateAnalysis,
     addVersion,
-    refineProjectContext,
+    setWubbleProjectId,
+    setProjectStatus,
   };
 }

@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import {
   Upload, Music, Play, Pause, Activity, Download, Wand2, ArrowRight,
   Sparkles, Cpu, ChevronDown, Plus, Clock, AlertCircle,
-  Gauge, Zap, Mic2, BarChart3, TrendingUp, Palette
+  Gauge, Zap, Mic2, BarChart3, TrendingUp, Palette, Send, Loader2, Film
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -27,7 +27,7 @@ type VideoAnalysis = {
   arc: string;
 };
 
-type AnalysisState = "idle" | "uploading" | "analyzing" | "generating" | "completed" | "error";
+type AnalysisState = "idle" | "uploading" | "analyzing" | "generating" | "refining" | "completed" | "error";
 
 // ─────────────────────────────────────────────────────────────
 // Loading stage messages for cinematic feel
@@ -45,7 +45,7 @@ export default function ClipTuneApp() {
   const {
     isLoaded, projects, currentProject, initializeApp, createNewProject,
     setCurrentProjectId, attachVideoToProject, updateAnalysis,
-    addVersion, refineProjectContext
+    addVersion, setWubbleProjectId, setProjectStatus
   } = useProjects();
 
   // ── Core analysis state ──
@@ -57,8 +57,11 @@ export default function ClipTuneApp() {
   const [progress, setProgress] = useState(0);
   const [loadingText, setLoadingText] = useState("");
 
-  // ── Refinement (stubbed) ──
+  // ── Director Mode (Refinement) ──
   const [refineInput, setRefineInput] = useState("");
+  const [isRefining, setIsRefining] = useState(false);
+  const [refineError, setRefineError] = useState("");
+  const refineInputRef = useRef<HTMLInputElement>(null);
 
   // ── Audio ──
   const [isPlaying, setIsPlaying] = useState(false);
@@ -117,19 +120,21 @@ export default function ClipTuneApp() {
     }
   }, [currentProject?.versions.length]);
 
-  const audioUrl = currentProject?.versions?.[currentProject.versions.length - 1]?.audioUrl;
+  const activeVersion = currentProject?.versions?.[activeVersionIndex] || null;
+  const activeAudioUrl = activeVersion?.audioUrl || null;
 
   useEffect(() => {
-    if (!audioRef.current || !audioUrl) return;
+    if (!audioRef.current || !activeAudioUrl) return;
 
     const audio = audioRef.current;
-    audio.src = audioUrl;
+    audio.src = activeAudioUrl;
+    setAudioCurrentTime(0);
 
     audio.onloadedmetadata = () => {
       setDuration(audio.duration);
       audio.play().then(() => setIsPlaying(true)).catch(() => {});
     };
-  }, [audioUrl]);
+  }, [activeAudioUrl]);
 
   // ─────────────────────────────────────────────────────────────
   // CORE: Handle video upload → calls /api/analyze server route
@@ -197,7 +202,15 @@ export default function ClipTuneApp() {
       // Build the prompt for music generation
       const generativePrompt = `Generate a cinematic soundtrack. Mood: ${analysis.mood}. Energy: ${analysis.energy}. Tempo: ${analysis.tempo}. Style: ${analysis.style}. Instruments: ${analysis.instruments.join(', ')}. Pacing: ${analysis.pacing}. Arc: ${analysis.arc}.`;
 
-      // Trigger music generation
+      // Save the Wubble project ID for Director Mode refinements
+      console.log("[ClipTune] 📍 Wubble project_id from analysis:", data.projectId);
+      if (data.projectId) {
+        setWubbleProjectId(data.projectId);
+        console.log("[ClipTune] ✅ Stored wubbleProjectId for Director Mode");
+      } else {
+        console.warn("[ClipTune] ⚠️ No project_id received — Director Mode will be unavailable");
+      }
+
       const genRes = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -221,7 +234,7 @@ export default function ClipTuneApp() {
         [analysis.style, analysis.pacing, ...analysis.instruments.slice(0, 2)].filter(Boolean)
       );
 
-      // Add the real generated version
+      // Add V1
       addVersion(
         `${analysis.mood} — ${analysis.style}`,
         [analysis.style, `${Math.round(analysis.energy * 100)}% energy`, analysis.pacing].filter(Boolean),
@@ -240,7 +253,7 @@ export default function ClipTuneApp() {
       setAnalysisState("error");
       setLoadingText("");
     }
-  }, [attachVideoToProject, updateAnalysis, addVersion]);
+  }, [attachVideoToProject, updateAnalysis, addVersion, setWubbleProjectId]);
 
   // ── Drag and drop handlers ──
   const handleDragOver = useCallback((e: React.DragEvent) => {
@@ -261,12 +274,65 @@ export default function ClipTuneApp() {
     }
   }, [handleUploadFile]);
 
-  // ── Director Mode stub ──
+  // ── Director Mode — Refinement ──
   const handleRefine = async () => {
-    if (!refineInput.trim() || !currentProject) return;
-    console.log("[ClipTune] 🎬 Director refinement (music gen not yet implemented):", refineInput);
+    if (!refineInput.trim() || !currentProject?.wubbleProjectId) return;
+    if (isRefining) return;
+
+    const direction = refineInput.trim();
     setRefineInput("");
+    setIsRefining(true);
+    setRefineError("");
+    setAnalysisState("refining");
+    setIsPlaying(false);
+
+    try {
+      console.log(`[ClipTune] 🎬 Director Mode — Refining: "${direction}"`);
+
+      const res = await fetch("/api/refine", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectId: currentProject.wubbleProjectId,
+          direction,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || "Refinement failed");
+      }
+
+      // Add new version
+      const vNum = currentProject.versions.length + 1;
+      addVersion(
+        `Director V${vNum}`,
+        [direction.slice(0, 30)],
+        direction,
+        data.audioUrl
+      );
+
+      setAnalysisState("completed");
+      console.log(`[ClipTune] ✅ Refinement V${vNum} complete:`, data.audioUrl);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Unknown error";
+      console.error("[ClipTune] ❌ Refinement failed:", msg);
+      setRefineError(msg);
+      setAnalysisState("completed"); // Go back to completed to show player
+    } finally {
+      setIsRefining(false);
+    }
   };
+
+  const DIRECTION_SUGGESTIONS = [
+    "More intense and dramatic",
+    "Add piano and strings",
+    "Make it faster",
+    "Calmer and more ambient",
+    "Add more drums",
+    "More emotional",
+  ];
 
   // ── Navigation helpers ──
   const handleNewProjectMenuClick = () => {
@@ -295,9 +361,6 @@ export default function ClipTuneApp() {
   if (!isLoaded || !currentProject) return <div className="min-h-screen bg-sketch bg-opacity-10 bg-background" />;
 
   const isProcessing = analysisState === "uploading" || analysisState === "analyzing";
-  const viewingVersion = currentProject.versions.length > 0 && activeVersionIndex >= 0
-    ? currentProject.versions[activeVersionIndex]
-    : null;
 
   return (
     <div
@@ -479,7 +542,7 @@ export default function ClipTuneApp() {
 
 
           {/* ═══ COMPLETED STATE — AI Analysis Display ═══ */}
-          {(analysisState === "completed" || analysisState === "generating") && analysisResult && (
+          {(analysisState === "completed" || analysisState === "generating" || analysisState === "refining") && analysisResult && (
             <div className="space-y-6 animate-in fade-in slide-in-from-bottom-6 duration-700 relative z-10">
 
               {/* ── Analysis Header Card ── */}
@@ -597,29 +660,74 @@ export default function ClipTuneApp() {
                 </div>
               )}
 
+              {/* ── Refining State ── */}
+              {analysisState === "refining" && (
+                <Card className="glass-panel border border-primary/20 shadow-xl rounded-3xl overflow-hidden mt-8 relative">
+                  <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-primary/30 via-primary to-primary/30 animate-pulse" />
+                  <CardContent className="p-8 flex flex-col items-center text-center">
+                    <div className="relative mb-6">
+                      <div className="absolute inset-0 bg-primary/20 blur-2xl rounded-full animate-pulse" />
+                      <div className="w-20 h-20 bg-white rounded-full flex items-center justify-center relative shadow-md border border-primary/20">
+                        <Film className="w-9 h-9 text-primary animate-pulse" strokeWidth={1.5} />
+                      </div>
+                    </div>
+                    <h3 className="text-xl font-bold text-zinc-800 mb-2">🎬 Director updating soundtrack…</h3>
+                    <p className="text-sm text-zinc-500 max-w-sm">The AI is refining the composition based on your direction. This may take a minute.</p>
+                    <div className="flex items-center gap-2 mt-4 text-xs text-primary font-semibold">
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Generating V{(currentProject?.versions?.length || 0) + 1}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
               {/* ── Generated Soundtrack Player ── */}
-              {analysisState === "completed" && currentProject?.versions && currentProject.versions.length > 0 && currentProject.versions[currentProject.versions.length - 1].audioUrl && (
-                <Card className="glass-panel border border-primary/20 shadow-xl rounded-3xl overflow-hidden mt-8 relative group cursor-pointer transition-all hover:shadow-primary/10">
-                  <div className="absolute inset-x-0 bottom-0 h-1bg-gradient-to-r from-primary/30 to-primary/80" />
+              {(analysisState === "completed" || analysisState === "refining") && currentProject?.versions && currentProject.versions.length > 0 && activeVersion?.audioUrl && (
+                <Card className={`glass-panel border shadow-xl rounded-3xl overflow-hidden mt-8 relative transition-all duration-500 ${analysisState === "refining" ? "opacity-60 border-zinc-200" : "border-primary/20 hover:shadow-primary/10"}`}>
+                  <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-primary/30 to-primary/80" />
                   <CardContent className="p-6">
+
+                    {/* ── Version Tabs ── */}
+                    {currentProject.versions.length > 1 && (
+                      <div className="flex items-center gap-1.5 mb-5 pb-4 border-b border-zinc-100 overflow-x-auto scrollbar-hide">
+                        {currentProject.versions.map((ver, idx) => (
+                          <button
+                            key={ver.versionId}
+                            onClick={() => {
+                              setActiveVersionIndex(idx);
+                              setIsPlaying(false);
+                            }}
+                            className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all duration-200 shrink-0 ${
+                              idx === activeVersionIndex
+                                ? "bg-primary text-white shadow-md shadow-primary/20"
+                                : "bg-zinc-100 text-zinc-500 hover:bg-zinc-200 hover:text-zinc-700"
+                            }`}
+                          >
+                            V{idx + 1}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+
                     <div className="flex items-center gap-6">
                       
                       <Button
                         onClick={handlePlayPause}
-                        className="w-16 h-16 rounded-2xl bg-primary shadow-lg shadow-primary/30 hover:bg-primary/95 flex items-center justify-center shrink-0 transition-transform hover:scale-105 active:scale-95"
+                        disabled={analysisState === "refining"}
+                        className="w-16 h-16 rounded-2xl bg-primary shadow-lg shadow-primary/30 hover:bg-primary/95 flex items-center justify-center shrink-0 transition-transform hover:scale-105 active:scale-95 disabled:opacity-50"
                       >
                         {isPlaying ? <Pause className="w-8 h-8 text-white fill-current" /> : <Play className="w-8 h-8 text-white fill-current ml-1" />}
                       </Button>
 
-                      <div className="flex-1">
+                      <div className="flex-1 min-w-0">
                         <div className="flex items-end justify-between mb-2">
-                          <div>
+                          <div className="min-w-0">
                             <p className="text-xs font-bold text-primary tracking-wider uppercase mb-1 flex items-center gap-1.5"><Music className="w-3.5 h-3.5" /> Soundtrack</p>
-                            <h3 className="text-xl font-bold text-zinc-900">{currentProject.versions[currentProject.versions.length - 1].songTitle}</h3>
+                            <h3 className="text-xl font-bold text-zinc-900 truncate">{activeVersion.songTitle}</h3>
                           </div>
                           
-                          <div className="flex flex-col items-end gap-1">
-                             <span className="text-xs font-mono text-zinc-400 bg-zinc-100 px-2 py-1 rounded-md">V{currentProject.versions.length}</span>
+                          <div className="flex flex-col items-end gap-1 shrink-0 ml-3">
+                             <span className="text-xs font-mono text-zinc-400 bg-zinc-100 px-2 py-1 rounded-md">{activeVersion.label}</span>
                              <span className="text-xs font-mono font-medium text-zinc-500">{formatTime(audioCurrentTime)} / {formatTime(duration)}</span>
                           </div>
                         </div>
@@ -641,8 +749,13 @@ export default function ClipTuneApp() {
                            </div>
                         </div>
                         
-                        <div className="flex gap-2 mt-4 flex-wrap">
-                          {currentProject.versions[currentProject.versions.length - 1].outputTags.map((tag, i) => (
+                        {/* Prompt used for this version */}
+                        {activeVersion.promptUsed && activeVersionIndex > 0 && (
+                          <p className="text-xs text-zinc-400 mt-3 italic truncate">Direction: &ldquo;{activeVersion.promptUsed}&rdquo;</p>
+                        )}
+
+                        <div className="flex gap-2 mt-3 flex-wrap">
+                          {activeVersion.outputTags.map((tag, i) => (
                              <span key={i} className="text-xs bg-zinc-100 text-zinc-600 px-2.5 py-1 rounded-md capitalize">{tag}</span>
                           ))}
                         </div>
@@ -650,7 +763,7 @@ export default function ClipTuneApp() {
 
                       <div className="shrink-0 pl-4 border-l border-zinc-100">
                         <a 
-                          href={currentProject.versions[currentProject.versions.length - 1].audioUrl} 
+                          href={activeVersion.audioUrl} 
                           download
                           className="flex items-center justify-center w-10 h-10 text-zinc-400 hover:text-primary hover:bg-primary/5 rounded-xl transition-colors"
                         >
@@ -669,6 +782,71 @@ export default function ClipTuneApp() {
                     }}
                     onEnded={() => setIsPlaying(false)}
                   />
+                </Card>
+              )}
+
+              {/* ═══ DIRECTOR MODE — Refinement Input ═══ */}
+              {analysisState === "completed" && currentProject?.wubbleProjectId && currentProject.versions.length > 0 && (
+                <Card className="glass-panel border-0 shadow-xl rounded-3xl overflow-hidden mt-6 relative animate-in fade-in slide-in-from-bottom-4 duration-500">
+                  <div className="absolute inset-x-0 top-0 h-0.5 bg-gradient-to-r from-transparent via-primary/40 to-transparent" />
+                  <CardContent className="p-6">
+                    <div className="flex items-center gap-2 mb-4">
+                      <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
+                        <Wand2 className="w-4 h-4 text-primary" />
+                      </div>
+                      <div>
+                        <h3 className="text-sm font-bold text-zinc-800">Director Mode</h3>
+                        <p className="text-xs text-zinc-400">Refine the soundtrack with natural language</p>
+                      </div>
+                    </div>
+
+                    {/* Suggestion chips */}
+                    <div className="flex flex-wrap gap-2 mb-4">
+                      {DIRECTION_SUGGESTIONS.map((suggestion, i) => (
+                        <button
+                          key={i}
+                          onClick={() => { setRefineInput(suggestion); refineInputRef.current?.focus(); }}
+                          className="text-xs px-3 py-1.5 rounded-lg bg-zinc-50 border border-zinc-200 text-zinc-500 hover:bg-primary/5 hover:border-primary/20 hover:text-primary transition-all duration-200"
+                        >
+                          {suggestion}
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* Input + Send */}
+                    <div className="flex gap-3">
+                      <div className="flex-1 relative">
+                        <Input
+                          ref={refineInputRef}
+                          value={refineInput}
+                          onChange={(e) => setRefineInput(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleRefine(); } }}
+                          placeholder="e.g. Make it more intense and add piano…"
+                          disabled={isRefining}
+                          className="h-12 rounded-xl border-zinc-200 bg-white/80 pl-4 pr-4 text-sm placeholder:text-zinc-400 focus:border-primary/30 focus:ring-primary/20 disabled:opacity-50"
+                        />
+                      </div>
+                      <Button
+                        onClick={handleRefine}
+                        disabled={!refineInput.trim() || isRefining}
+                        className="h-12 px-6 rounded-xl bg-primary hover:bg-primary/95 shadow-md shadow-primary/20 disabled:opacity-40 transition-all duration-200"
+                      >
+                        {isRefining ? (
+                          <Loader2 className="w-5 h-5 animate-spin" />
+                        ) : (
+                          <><Send className="w-4 h-4 mr-2" /> Refine</>
+                        )}
+                      </Button>
+                    </div>
+
+                    {/* Refine error */}
+                    {refineError && (
+                      <div className="mt-3 flex items-center gap-2 text-xs text-red-500 bg-red-50 px-3 py-2 rounded-lg">
+                        <AlertCircle className="w-3.5 h-3.5" />
+                        {refineError}
+                      </div>
+                    )}
+                  </CardContent>
                 </Card>
               )}
 
